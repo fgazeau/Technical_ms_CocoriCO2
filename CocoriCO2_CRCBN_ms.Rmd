@@ -1,0 +1,586 @@
+---
+title: CocoriCO~2~ - Technical manuscript
+author: |
+   | Fr&eacute;d&eacute;ric Gazeau
+   | Pierre Urrutti
+   
+date: '`r format(Sys.time(), "%d %B %Y %H:%M")`'
+
+output:
+    rmdformats::robobook:
+     self_contained: true
+     thumbnails: false
+     lightbox: true
+     gallery: true
+     highlight: pygments
+---
+<center>
+![](https://www.dropbox.com/s/vzhyposau8acv7g/Logos.png?dl=1){width=75%}
+</center>
+
+```{r setup, include=FALSE}
+require(RCurl)
+require(ggplot2)
+require(lubridate)
+require(dplyr)
+require(tidyr)
+require(readr)
+require(leaflet)
+require(purrr)
+require(kableExtra)
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r data_process, include=FALSE}
+files <- dir("./Data/Data_CRCBN", pattern = "*.csv")
+data <- files %>%
+  map(function(x) read.csv(file.path("./Data/Data_CRCBN", x), sep=";"))  %>% 
+  reduce(rbind)
+
+data <- data.frame(data)
+data <- subset(data, Cleanup_Mode == "False")
+
+data$Time <- mdy_hms(data$Time, tz="UTC")
+
+Summary_regul<- data %>%
+  mutate(DiffTC1 = abs(Condition.1._Temperature - Condition.1._consigne_Temperature), DiffTC1a = abs(Condition.1._Meso.0._Temperature - Condition.1._consigne_Temperature), DiffTC1b = abs(Condition.1._Meso.1._Temperature - Condition.1._consigne_Temperature), DiffTC1c = abs(Condition.1._Meso.2._Temperature - Condition.1._consigne_Temperature), DiffTC2 = abs(Condition.2._Temperature - Condition.2._consigne_Temperature), DiffTC2a = abs(Condition.2._Meso.0._Temperature - Condition.2._consigne_Temperature), DiffTC2b = abs(Condition.2._Meso.2._Temperature - Condition.2._consigne_Temperature), DiffTC2c = abs(Condition.2._Meso.2._Temperature - Condition.2._consigne_Temperature), DiffTC3 = abs(Condition.3._Temperature - Condition.3._consigne_Temperature), DiffTC3a = abs(Condition.3._Meso.0._Temperature - Condition.3._consigne_Temperature), DiffTC3b = abs(Condition.3._Meso.1._Temperature - Condition.3._consigne_Temperature), DiffTC3c = abs(Condition.3._Meso.2._Temperature - Condition.3._consigne_Temperature), DiffpHC1 = abs(Condition.1._pH - Condition.1._consigne_pH), DiffpHC1a = abs(Condition.1._Meso.0._pH - Condition.1._consigne_pH), DiffpHC1b = abs(Condition.1._Meso.1._pH - Condition.1._consigne_pH), DiffpHC1c = abs(Condition.1._Meso.2._pH - Condition.1._consigne_pH), DiffpHC2 = abs(Condition.2._pH - Condition.2._consigne_pH), DiffpHC2a = abs(Condition.2._Meso.0._pH - Condition.2._consigne_pH), DiffpHC2b = abs(Condition.2._Meso.2._pH - Condition.2._consigne_pH), DiffpHC2c = abs(Condition.2._Meso.2._pH - Condition.2._consigne_pH), DiffpHC3 = abs(Condition.3._pH - Condition.3._consigne_pH), DiffpHC3a = abs(Condition.3._Meso.0._pH - Condition.3._consigne_pH), DiffpHC3b = abs(Condition.3._Meso.1._pH - Condition.3._consigne_pH), DiffpHC3c = abs(Condition.3._Meso.2._pH - Condition.3._consigne_pH)) %>%
+mutate(DiffTC1 = case_when(DiffTC1 > 1 ~ NA_real_, TRUE ~ DiffTC1), DiffTC2 = case_when(DiffTC2 > 1 ~ NA_real_, TRUE ~ DiffTC2), DiffTC3 = case_when(DiffTC3 > 1 ~ NA_real_, TRUE ~ DiffTC3), DiffpHC1 = case_when(DiffpHC1 > 1 ~ NA_real_, TRUE ~ DiffpHC1), DiffpHC2 = case_when(DiffpHC2 > 1 ~ NA_real_, TRUE ~ DiffpHC2), DiffpHC3 = case_when(DiffpHC3 > 1 ~ NA_real_, TRUE ~ DiffpHC3)) %>%
+summarise_at(c("DiffTC1", "DiffTC1a", "DiffTC1b", "DiffTC1c", "DiffTC2", "DiffTC2a", "DiffTC2b", "DiffTC2c", "DiffTC3", "DiffTC3a", "DiffTC3b", "DiffTC3c", "DiffpHC1", "DiffpHC1a", "DiffpHC1b", "DiffpHC1c", "DiffpHC2", "DiffpHC2a", "DiffpHC2b", "DiffpHC2c", "DiffpHC3", "DiffpHC3a", "DiffpHC3b", "DiffpHC3c"),
+               .funs = c(Mean="mean", Sd="sd"), na.rm = TRUE)
+
+write.csv(data, "H:/.shortcut-targets-by-id/1uI1-pCbSFZNOcSClnEN8LTo1j3nLFrIz/Task 2 - Expérimental/Data_interface/Compilation_CRCM.csv")
+
+hourly_data<- data %>%
+  mutate(Hour = floor_date(Time, "hour")) %>%
+  group_by(Hour) %>%
+  summarise_all(mean)
+
+daily_data<- data %>%
+  mutate(Day = floor_date(Time, "day")) %>%
+  group_by(Day) %>%
+  summarise_all(mean)
+
+myurl1 <- "https://docs.google.com/spreadsheets/d/e/2PACX-1vTjxuyFnBC_SUC1aw2iTzxbnbyuJ3SIIDUHV0oiNaQq3QsRQgYl_zCQ5R1J4DyVuTm0GrbFiqK7fIn2/pub?gid=0&single=true&output=csv"
+Drift_pH <- read.csv(url(myurl1), header=T, stringsAsFactors = FALSE)
+```
+
+```{r plot_setup, include=FALSE}
+#Background and axes
+mytheme <- theme_light() +
+  theme(axis.text.x=element_text(size=12, color="black"),
+        axis.title.x=element_text(color="black", size=12),
+        axis.text.y=element_text(size=12, color="black"),
+        axis.title.y=element_text(size=12, color="black"),
+        plot.title = element_text(face="bold", size=12, hjust = 0.5, color="black"),
+        plot.caption=element_text(size=12, color="black"),
+        legend.text = element_text(size=12, color="black"),
+        legend.title = element_blank(),
+        strip.text.x = element_text(size = 12, color="black")
+        )
+
+color <- c("black", "black", "black","blue", "blue", "blue", "green", "green", "green", "red", "red", "red")
+linetype <- c("solid", "dashed", "dotted", "solid", "dashed", "dotted", "solid", "dashed", "dotted", "solid", "dashed", "dotted")
+```
+
+
+# **Environmental data**
+
+## Temperature {.tabset}
+
+### Raw
+
+```{r temp_env_raw, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(data, aes(x=Time, y=Ambient_Temperature)) +
+  geom_line(size=0.4, color="blue")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(6, 20) +
+  xlab("Date") +  
+  ylab("Temperature (°C)")
+```
+
+### Hourly
+
+```{r temp_env_hourly, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(hourly_data, aes(x=Time, y=Ambient_Temperature)) +
+  geom_line(size=0.4, color="blue")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(6, 20) +
+  xlab("Date") +  
+  ylab("Temperature (°C)")
+```
+
+### Daily
+
+```{r temp_env_daily, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(daily_data, aes(x=Time, y=Ambient_Temperature)) +
+  geom_line(size=0.4, color="blue")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(6, 20) +
+  xlab("Date") +  
+  ylab("Temperature (°C)")
+```
+
+## Salinity {.tabset}
+
+### Raw
+
+```{r sal_env_raw, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(data, aes(x=Time, y=Ambient_Salinity)) +
+  geom_line(size=0.4, color="red")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(30, 36) +
+  xlab("Date") +  
+  ylab("Salinity")
+```
+
+### Hourly
+
+```{r sal_env_hourly, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(hourly_data, aes(x=Time, y=Ambient_Salinity)) +
+  geom_line(size=0.4, color="red")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(30, 36) +
+  xlab("Date") +  
+  ylab("Salinity")
+```
+
+### Daily
+
+```{r sal_env_daily, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(daily_data, aes(x=Time, y=Ambient_Salinity)) +
+  geom_line(size=0.4, color="red")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(30, 36) +
+  xlab("Date") +  
+  ylab("Salinity")
+```
+
+## pH {.tabset}
+
+### Raw
+
+```{r pH_env_raw, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(data, aes(x=Time, y=Ambient_pH)) +
+  geom_line(size=0.4, color="black")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(7.7, 8.3) +
+  xlab("Date") +  
+  ylab(expression(pH[T]))
+```
+
+### Hourly 
+
+```{r pH_env_hourly, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(hourly_data, aes(x=Time, y=Ambient_pH)) +
+  geom_line(size=0.4, color="black")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(7.7, 8.3) +
+  xlab("Date") +  
+  ylab(expression(pH[T]))
+```
+
+### Daily 
+
+```{r pH_env_daily, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(daily_data, aes(x=Time, y=Ambient_pH)) +
+  geom_line(size=0.4, color="black")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(7.7, 8.3) +
+  xlab("Date") +  
+  ylab(expression(pH[T]))
+```
+
+## Oxygen {.tabset}
+
+### Raw
+
+```{r O2_env_raw, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(data, aes(x=Time, y=Ambient_O2)) +
+  geom_line(size=0.4, color="orange")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(70, 120) +
+  xlab("Date") +  
+  ylab("Oxygene (% saturation)")
+```
+
+### Hourly
+
+```{r O2_env_hourly, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(hourly_data, aes(x=Time, y=Ambient_O2)) +
+  geom_line(size=0.8, color="orange")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(70, 120) +
+  xlab("Date") +  
+  ylab("Oxygene (% saturation)")
+```
+
+### Daily
+
+```{r O2_env_daily, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(daily_data, aes(x=Time, y=Ambient_O2)) +
+  geom_line(size=0.8, color="orange")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(70, 120) +
+  xlab("Date") +  
+  ylab("Oxygene (% saturation)")
+```
+
+# **Experimental data**
+
+## Raw data {.tabset}
+
+### Temperature
+
+```{r temp_all_raw, echo=FALSE, fig.width=7, fig.height=5}
+
+temp_raw <- ggplot() +
+  geom_line(data=data, aes(x=Time, y=Ambient_Temperature, colour="Ambient", linetype="Ambient"), size=0.4)  +
+  geom_line(data=data, aes(x=Time, y=Condition.0._Meso.0._Temperature, colour="2022_a", linetype="2022_a"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.0._Meso.1._Temperature, colour="2022_b", linetype="2022_b"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.0._Meso.2._Temperature, colour="2022_c", linetype="2022_c"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Meso.0._Temperature, colour="2050_a", linetype="2050_a"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Meso.1._Temperature, colour="2050_b", linetype="2050_b"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Meso.2._Temperature, colour="2050_c", linetype="2050_c"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Meso.0._Temperature, colour="2075_a", linetype="2075_a"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Meso.1._Temperature, colour="2075_b", linetype="2075_b"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Meso.2._Temperature, colour="2075_c", linetype="2075_c"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Meso.0._Temperature, colour="2100_a", linetype="2100_a"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Meso.1._Temperature, colour="2100_b", linetype="2100_b"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Meso.2._Temperature, colour="2100_c", linetype="2100_c"), size=0.4) +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  scale_color_manual(name="Tanks", values = c("Ambient" = "orange", "2022_a" = "black", "2022_b" = "black", "2022_c" = "black", "2050_a" = "blue", "2050_b" = "blue", "2050_c" = "blue", "2075_a" = "green", "2075_b" = "green", "2075_c" = "green", "2100_a" = "red", "2100_b" = "red", "2100_c" = "red")) +
+  scale_linetype_manual(name="Tanks", values = c("Ambient" = "solid", "2022_a" = "solid", "2022_b" = "dashed", "2022_c" = "dotted", "2050_a" = "solid", "2050_b" = "dashed", "2050_c" = "dotted", "2075_a" = "solid", "2075_b" = "dashed", "2075_c" = "dotted", "2100_a" = "solid", "2100_b" = "dashed", "2100_c" = "dotted")) +
+  mytheme +
+  ylim(8, 22) +
+  xlab("Date") +  
+  ylab("Temperature (°C)")
+
+temp_raw
+ggsave(file="./Figures/Figure 1/temp_raw.svg", plot=temp_raw, width=10, height=8)
+```
+
+### pH
+
+```{r pH_all_raw, echo=FALSE, fig.width=7, fig.height=5}
+
+pH_raw <- ggplot() +
+  geom_line(data=data, aes(x=Time, y=Ambient_pH, colour="Ambient", linetype="Ambient"), size=0.4)  +
+  geom_line(data=data, aes(x=Time, y=Condition.0._Meso.0._pH, colour="2022_a", linetype="2022_a"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.0._Meso.1._pH, colour="2022_b", linetype="2022_b"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.0._Meso.2._pH, colour="2022_c", linetype="2022_c"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Meso.0._pH, colour="2050_a", linetype="2050_a"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Meso.1._pH, colour="2050_b", linetype="2050_b"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Meso.2._pH, colour="2050_c", linetype="2050_c"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Meso.0._pH, colour="2075_a", linetype="2075_a"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Meso.1._pH, colour="2075_b", linetype="2075_b"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Meso.2._pH, colour="2075_c", linetype="2075_c"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Meso.0._pH, colour="2100_a", linetype="2100_a"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Meso.1._pH, colour="2100_b", linetype="2100_b"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Meso.2._pH, colour="2100_c", linetype="2100_c"), size=0.4) +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  scale_color_manual(name="Tanks", values = c("Ambient" = "orange", "2022_a" = "black", "2022_b" = "black", "2022_c" = "black", "2050_a" = "blue", "2050_b" = "blue", "2050_c" = "blue", "2075_a" = "green", "2075_b" = "green", "2075_c" = "green", "2100_a" = "red", "2100_b" = "red", "2100_c" = "red")) +
+  scale_linetype_manual(name="Tanks", values = c("Ambient" = "solid", "2022_a" = "solid", "2022_b" = "dashed", "2022_c" = "dotted", "2050_a" = "solid", "2050_b" = "dashed", "2050_c" = "dotted", "2075_a" = "solid", "2075_b" = "dashed", "2075_c" = "dotted", "2100_a" = "solid", "2100_b" = "dashed", "2100_c" = "dotted")) +
+  mytheme +
+  ylim(7.5, 8.3) +
+  xlab("Date") +  
+  ylab(expression(pH[T]))
+
+pH_raw
+
+ggsave(file="./Figures/Figure 1/pH_raw.svg", plot=pH_raw, width=10, height=8)
+```
+
+## Raw data transition period {.tabset}
+
+### Temperature
+
+```{r temp_all_raw_trans, echo=FALSE, fig.width=7, fig.height=5}
+
+data_trans <- subset(data, Time < "2022-02-25")
+temp_trans_raw <- ggplot() +
+  geom_line(data=data_trans, aes(x=Time, y=Ambient_Temperature, colour="Ambient", linetype="Ambient"), size=0.4)  +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.0._Meso.0._Temperature, colour="2022_a", linetype="2022_a"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.0._Meso.1._Temperature, colour="2022_b", linetype="2022_b"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.0._Meso.2._Temperature, colour="2022_c", linetype="2022_c"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.1._Meso.0._Temperature, colour="2050_a", linetype="2050_a"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.1._Meso.1._Temperature, colour="2050_b", linetype="2050_b"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.1._Meso.2._Temperature, colour="2050_c", linetype="2050_c"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.2._Meso.0._Temperature, colour="2075_a", linetype="2075_a"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.2._Meso.1._Temperature, colour="2075_b", linetype="2075_b"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.2._Meso.2._Temperature, colour="2075_c", linetype="2075_c"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.3._Meso.0._Temperature, colour="2100_a", linetype="2100_a"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.3._Meso.1._Temperature, colour="2100_b", linetype="2100_b"), size=0.4) +
+  geom_line(data=data_trans, aes(x=Time, y=Condition.3._Meso.2._Temperature, colour="2100_c", linetype="2100_c"), size=0.4) +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  scale_color_manual(name="Tanks", values = c("Ambient" = "orange", "2022_a" = "black", "2022_b" = "black", "2022_c" = "black", "2050_a" = "blue", "2050_b" = "blue", "2050_c" = "blue", "2075_a" = "green", "2075_b" = "green", "2075_c" = "green", "2100_a" = "red", "2100_b" = "red", "2100_c" = "red")) +
+  scale_linetype_manual(name="Tanks", values = c("Ambient" = "solid", "2022_a" = "solid", "2022_b" = "dashed", "2022_c" = "dotted", "2050_a" = "solid", "2050_b" = "dashed", "2050_c" = "dotted", "2075_a" = "solid", "2075_b" = "dashed", "2075_c" = "dotted", "2100_a" = "solid", "2100_b" = "dashed", "2100_c" = "dotted")) +
+  mytheme +
+  ylim(8, 22) +
+  xlab("Date") +  
+  ylab("Temperature (°C)")
+
+temp_trans_raw
+ggsave(file="./Figures/Figure 1/temp_raw_trans.svg", plot=temp_trans_raw, width=10, height=8)
+```
+## Offsets in mixing tanks {.tabset}
+
+### Temperature
+
+```{r temp_offset_mixing_tanks, echo=FALSE, fig.width=7, fig.height=5}
+
+delta_temp_mixing_daily <- ggplot() +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Temperature-Ambient_Temperature, color="2050", linetype="2050"), size=1)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Temperature-Ambient_Temperature, color="2075", linetype="2075"), size=1)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Temperature-Ambient_Temperature, color="2100", linetype="2100"), size=1)  +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Temperature-Ambient_Temperature, color="2050", linetype="2050"), size=0.8, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Temperature-Ambient_Temperature, color="2075", linetype="2075"), size=0.8, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Temperature-Ambient_Temperature, color="2100", linetype="2100"), size=0.8, alpha = 0.02) +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  scale_color_manual(name="Mixing tanks", values = c("2050" = "blue", "2075" = "green", "2100" = "red")) +
+  scale_linetype_manual(name="Mixing tanks", values = c("2050" = "solid", "2075" = "solid", "2100" = "solid")) +
+  geom_hline(yintercept = 0.62, colour="blue", linetype="dotted", size = 1) +
+  geom_hline(yintercept = 1.06, colour="green", linetype="dotted", size = 1) +
+  geom_hline(yintercept = 1.77, colour="red", linetype="dotted", size = 1) +
+  mytheme +
+  ylim(0, 3) +
+  xlab("Date") +  
+  ylab("Temperature offset (°C)")
+
+delta_temp_mixing_daily
+
+#ggsave(file="Delta_temperature/delta_temp_mixing_daily.pdf", plot=delta_temp_mixing_daily, width=10, height=8)
+```
+
+### pH
+
+```{r pH_offset_mixing_tanks, echo=FALSE, fig.width=7, fig.height=5}
+
+delta_pH_mixing_tanks <- ggplot() +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._pH-Ambient_pH, color="2050", linetype="2050"), size=1)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._pH-Ambient_pH, color="2075", linetype="2075"), size=1)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._pH-Ambient_pH, color="2100", linetype="2100"), size=1)  +
+  geom_line(data=data, aes(x=Time, y=Condition.1._pH-Ambient_pH, color="2050", linetype="2050"), size=0.8, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._pH-Ambient_pH, color="2075", linetype="2075"), size=0.8, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._pH-Ambient_pH, color="2100", linetype="2100"), size=0.8, alpha = 0.02) +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  scale_color_manual(name="Mixing tanks", values = c("2050" = "blue", "2075" = "green", "2100" = "red")) +
+  scale_linetype_manual(name="Mixing tanks", values = c("2050" = "solid", "2075" = "solid", "2100" = "solid")) +
+  geom_hline(yintercept = -0.11, colour="blue", linetype="dotted", size = 1) +
+  geom_hline(yintercept = -0.21, colour="green", linetype="dotted", size = 1) +
+  geom_hline(yintercept = -0.29, colour="red", linetype="dotted", size = 1) +
+  mytheme +
+  ylim(-0.4, 0) +
+  xlab("Date") +  
+  ylab("pH offset")
+
+delta_pH_mixing_tanks
+
+#ggsave(file="Delta_pH/delta_pH_mixing_raw.pdf", plot=delta_pH_mixing_raw, width=10, height=8)
+```
+
+## Offsets in incubation tanks {.tabset}
+
+### Temperature
+
+```{r temp_offset_alltanks_daily, echo=FALSE, fig.width=7, fig.height=5}
+
+delta_temp_incubation_daily <- ggplot() +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Meso.0._Temperature-Ambient_Temperature, color="2050_a", linetype="2050_a"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Meso.1._Temperature-Ambient_Temperature, color="2050_b", linetype="2050_b"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Meso.2._Temperature-Ambient_Temperature, color="2050_c", linetype="2050_c"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Meso.0._Temperature-Ambient_Temperature, color="2075_a", linetype="2075_a"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Meso.1._Temperature-Ambient_Temperature, color="2075_b", linetype="2075_b"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Meso.2._Temperature-Ambient_Temperature, color="2075_c", linetype="2075_c"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Meso.0._Temperature-Ambient_Temperature, color="2100_a", linetype="2100_a"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Meso.1._Temperature-Ambient_Temperature, color="2100_b", linetype="2100_b"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Meso.2._Temperature-Ambient_Temperature, color="2100_c", linetype="2100_c"), size=0.4)  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  scale_color_manual(name="Tanks", values = c("2050_a" = "blue", "2050_b" = "blue", "2050_c" = "blue", "2075_a" = "green", "2075_b" = "green", "2075_c" = "green", "2100_a" = "red", "2100_b" = "red", "2100_c" = "red")) +
+  scale_linetype_manual(name="Tanks", values = c("2050_a" = "solid", "2050_b" = "dashed", "2050_c" = "dotted", "2075_a" = "solid", "2075_b" = "dashed", "2075_c" = "dotted", "2100_a" = "solid", "2100_b" = "dashed", "2100_c" = "dotted")) +
+  geom_hline(yintercept = 0.62, colour="blue", linetype="dotted", size = 1) +
+  geom_hline(yintercept = 1.06, colour="green", linetype="dotted", size = 1) +
+  geom_hline(yintercept = 1.77, colour="red", linetype="dotted", size = 1) +
+  mytheme +
+  ylim(0, 3) +
+  xlab("Date") +
+  ylab("Temperature offset (°C)")
+
+delta_temp_incubation_daily
+#ggsave(file="Delta_temperature/delta_temp_incubation_daily.pdf", plot=delta_temp_incubation_daily, width=10, height=8)
+```
+
+### pH 
+
+```{r pH_offset_alltanks_daily, echo=FALSE, fig.width=7, fig.height=5}
+
+delta_pH_incubation_daily <- ggplot() +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Meso.0._pH-Ambient_pH, color="2050_a", linetype="2050_a"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Meso.1._pH-Ambient_pH, color="2050_b", linetype="2050_b"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Meso.2._pH-Ambient_pH, color="2050_c", linetype="2050_c"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Meso.0._pH-Ambient_pH, color="2075_a", linetype="2075_a"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Meso.1._pH-Ambient_pH, color="2075_b", linetype="2075_b"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Meso.2._pH-Ambient_pH, color="2075_c", linetype="2075_c"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Meso.0._pH-Ambient_pH, color="2100_a", linetype="2100_a"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Meso.1._pH-Ambient_pH, color="2100_b", linetype="2100_b"), size=0.4)  +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Meso.2._pH-Ambient_pH, color="2100_c", linetype="2100_c"), size=0.4)  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  scale_color_manual(name="Tanks", values = c("2050_a" = "blue", "2050_b" = "blue", "2050_c" = "blue", "2075_a" = "green", "2075_b" = "green", "2075_c" = "green", "2100_a" = "red", "2100_b" = "red", "2100_c" = "red")) +
+  scale_linetype_manual(name="Tanks", values = c("2050_a" = "solid", "2050_b" = "dashed", "2050_c" = "dotted", "2075_a" = "solid", "2075_b" = "dashed", "2075_c" = "dotted", "2100_a" = "solid", "2100_b" = "dashed", "2100_c" = "dotted")) +
+  geom_hline(yintercept = -0.11, colour="blue", linetype="dotted", size = 1) +
+  geom_hline(yintercept = -0.21, colour="green", linetype="dotted", size = 1) +
+  geom_hline(yintercept = -0.29, colour="red", linetype="dotted", size = 1) +
+  mytheme +
+  ylim(-0.4, 0) +
+  xlab("Date") +  
+  ylab("pH offset")
+
+delta_pH_incubation_daily
+#ggsave(file="Delta_pH/delta_pH_incubation_daily.pdf", plot=delta_pH_incubation_daily, width=10, height=8)
+```
+
+# Absolute mean differences between measured values and setpoints
+
+```{r kable_mean differences measured vs setpoint, echo=FALSE, fig.width=7, fig.height=5}
+Summary_regul_Tmean = Summary_regul %>%
+ select(DiffTC1_Mean, DiffTC1a_Mean, DiffTC1b_Mean, DiffTC1c_Mean, DiffTC2_Mean, DiffTC2a_Mean, DiffTC2b_Mean, DiffTC2c_Mean, DiffTC3_Mean, DiffTC3a_Mean, DiffTC3b_Mean, DiffTC3c_Mean)
+
+colnames(Summary_regul_Tmean) <- c("2050", "2050a", "2050b", "2050c", "2075", "2075a", "2075b", "2075c", "2100", "2100a", "2100b", "2100c")
+
+Summary_regul_Tsd = Summary_regul %>%
+ select(DiffTC1_Sd, DiffTC1a_Sd, DiffTC1b_Sd, DiffTC1c_Sd, DiffTC2_Sd, DiffTC2a_Sd, DiffTC2b_Sd, DiffTC2c_Sd, DiffTC3_Sd, DiffTC3a_Sd, DiffTC3b_Sd, DiffTC3c_Sd)
+ 
+colnames(Summary_regul_Tsd) <- c("2050", "2050a", "2050b", "2050c", "2075", "2075a", "2075b", "2075c", "2100", "2100a", "2100b", "2100c")
+
+Summary_regul_T <- rbind(Summary_regul_Tmean, Summary_regul_Tsd)
+
+Summary_regul_pHmean = Summary_regul %>%
+ select(DiffpHC1_Mean, DiffpHC1a_Mean, DiffpHC1b_Mean, DiffpHC1c_Mean, DiffpHC2_Mean, DiffpHC2a_Mean, DiffpHC2b_Mean, DiffpHC2c_Mean, DiffpHC3_Mean, DiffpHC3a_Mean, DiffpHC3b_Mean, DiffpHC3c_Mean)
+
+colnames(Summary_regul_pHmean) <- c("2050", "2050a", "2050b", "2050c", "2075", "2075a", "2075b", "2075c", "2100", "2100a", "2100b", "2100c")
+ 
+Summary_regul_pHsd = Summary_regul %>%
+ select(DiffpHC1_Sd, DiffpHC1a_Sd, DiffpHC1b_Sd, DiffpHC1c_Sd, DiffpHC2_Sd, DiffpHC2a_Sd, DiffpHC2b_Sd, DiffpHC2c_Sd, DiffpHC3_Sd, DiffpHC3a_Sd, DiffpHC3b_Sd, DiffpHC3c_Sd)
+
+colnames(Summary_regul_pHsd) <- c("2050", "2050a", "2050b", "2050c", "2075", "2075a", "2075b", "2075c", "2100", "2100a", "2100b", "2100c")
+
+Summary_regul_pH <- rbind(Summary_regul_pHmean, Summary_regul_pHsd)
+
+Summary_regul_Kable <- rbind(Summary_regul_T, Summary_regul_pH)
+
+rownames(Summary_regul_Kable) <- c("Mean T", "SD T", "Mean pH", "SD pH")
+
+Table <- kable(Summary_regul_Kable, caption = "Absolute mean (and SD) difference between measured temperature and pH values against setpoints", align=c('c','c', 'c', 'c', 'c', 'c', 'c', 'c') , digits=2) %>%
+kable_styling("striped") %>%
+  group_rows("Temperature", 1, 2) %>%
+  group_rows("pH", 3, 4) %>%
+scroll_box(width = "100%", height = "500px")
+
+Table
+```
+
+# **Technical data**
+
+## pH in CO~2~ saturated tank
+
+```{r pH_sat_raw, echo=FALSE, fig.width=7, fig.height=5}
+
+pHsat_raw <- ggplot(data, aes(x=Time, y=Condition.0._pH)) +
+  geom_line(size=0.8, color="black")  +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  mytheme +
+  ylim(4.6, 5.5) +
+  xlab("Date") +  
+  ylab("pH")
+
+pHsat_raw
+#ggsave(file="pH_saturation_tank/pHsat_raw.pdf", plot=pHsat_raw, width=10, height=8)
+```
+
+## Flowrates
+
+```{r Flowrates, echo=FALSE, fig.width=7, fig.height=5}
+
+flowrate_daily <- ggplot() +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.0._Meso.0._FlowRate, colour="2022-a", linetype="2022-a"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.0._Meso.1._FlowRate, colour="2022-b", linetype="2022-b"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.0._Meso.2._FlowRate, colour="2022-c", linetype="2022-c"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Meso.0._FlowRate, colour="2050-a", linetype="2050-a"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Meso.1._FlowRate, colour="2050-b", linetype="2050-b"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.1._Meso.2._FlowRate, colour="2050-c", linetype="2050-c"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Meso.0._FlowRate, colour="2075-a", linetype="2075-a"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Meso.1._FlowRate, colour="2075-b", linetype="2075-b"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.2._Meso.2._FlowRate, colour="2075-c", linetype="2075-c"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Meso.0._FlowRate, colour="2100-a", linetype="2100-a"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Meso.1._FlowRate, colour="2100-b", linetype="2100-b"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Condition.3._Meso.2._FlowRate, colour="2100-c", linetype="2100-c"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Condition.0._Meso.0._FlowRate, colour="2022-a", linetype="2022-a"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.0._Meso.1._FlowRate, colour="2022-b", linetype="2022-b"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.0._Meso.2._FlowRate, colour="2022-c", linetype="2022-c"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Meso.0._FlowRate, colour="2050-a", linetype="2050-a"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Meso.1._FlowRate, colour="2050-b", linetype="2050-b"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.1._Meso.2._FlowRate, colour="2050-c", linetype="2050-c"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Meso.0._FlowRate, colour="2075-a", linetype="2075-a"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Meso.1._FlowRate, colour="2075-b", linetype="2075-b"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.2._Meso.2._FlowRate, colour="2075-c", linetype="2075-c"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Meso.0._FlowRate, colour="2100-a", linetype="2100-a"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Meso.1._FlowRate, colour="2100-b", linetype="2100-b"), size=0.4, alpha = 0.02) +
+  geom_line(data=data, aes(x=Time, y=Condition.3._Meso.2._FlowRate, colour="2100-c", linetype="2100-c"), size=0.4, alpha = 0.02) +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  scale_color_manual(name="Tank", values = c("2022-a" = "black", "2022-b" = "black", "2022-c" = "black", "2050-a" = "blue", "2050-b" = "blue", "2050-c" = "blue", "2075-a" = "green", "2075-b" = "green", "2075-c" = "green", "2100-a" = "red", "2100-b" = "red", "2100-c" = "red")) +
+  scale_linetype_manual(name="Tank", values = c("2022-a" = "solid", "2022-b" = "dashed", "2022-c" = "dotted", "2050-a" = "solid", "2050-b" = "dashed", "2050-c" = "dotted", "2075-a" = "solid", "2075-b" = "dashed", "2075-c" = "dotted", "2100-a" = "solid", "2100-b" = "dashed", "2100-c" = "dotted")) +
+  mytheme +
+  ylim(0, 10) +
+  xlab("Date") +  
+  ylab(expression(Flowrate ~ (L ~ min^{-1})))
+
+flowrate_daily
+#ggsave(file="Flowrates/flowrate_daily.pdf", plot=flowrate_daily, width=10, height=8)
+```
+
+## Seawater pressure
+
+```{r pressure_daily, echo=FALSE, fig.width=7, fig.height=5}
+
+seawater_pressure_daily <- ggplot() +
+  geom_line(data=daily_data, aes(x=Time, y=Cold_Water_Pressure, colour="Ambient"), size=0.4) +
+  geom_line(data=daily_data, aes(x=Time, y=Hot_Water_Pressure, colour="Warm"), size=0.4) +
+  geom_line(data=data, aes(x=Time, y=Cold_Water_Pressure, colour="Ambient"), size=0.4, alpha=0.02) +
+  geom_line(data=data, aes(x=Time, y=Hot_Water_Pressure, colour="Warm"), size=0.4, alpha=0.02) +
+  scale_x_datetime(date_labels = "%b", date_breaks = "1 month") +
+  scale_color_manual(name="", values = c("Ambient" = "blue", "Warm" = "red")) +
+  mytheme +
+  ylim(0, 1) +
+  ylab("Water pressure (b)") +
+  xlab("Date")
+
+seawater_pressure_daily
+#ggsave(file="Seawater_pressure/seawater_pressure_daily.pdf", plot=seawater_pressure_daily, width=10, height=8)
+```
+
+# **pH drift**
+
+```{r pH_drift, echo=FALSE, fig.width=7, fig.height=5}
+
+ggplot() +
+  geom_point(data=Drift_pH, aes(x=Nb, y=Delta_pH), size=0.4) +
+  geom_hline(yintercept = mean(Drift_pH$Delta_pH)) +
+  geom_hline(yintercept = sd(Drift_pH$Delta_pH), linetype="dotted") +
+  geom_hline(yintercept = -sd(Drift_pH$Delta_pH), linetype="dotted") +
+  mytheme +
+  ylim(-0.2, 0.2) +
+  ylab("pH drift") +
+  xlab("Calibration event")
+```
